@@ -2,12 +2,16 @@ from fastapi.testclient import TestClient
 from src.main import app
 import pytest
 from src.main import equipment_db
+from copy import deepcopy
 
 client = TestClient(app)
 
+initial_equipment = deepcopy(equipment_db)
+
+
 @pytest.fixture(autouse=True)
 def reset_equipment_db():
-    del equipment_db[3:]
+    equipment_db[:] = deepcopy(initial_equipment)
 
 def test_root():
     response = client.get("/")
@@ -68,3 +72,11 @@ def test_create_equipment_invalid_status():
     response = client.post("/equipment", json=invalid_equipment)
 
     assert response.status_code == 422
+
+def test_modify_equipment():
+    equipment_db[0].name = "Modified Analyzer"
+
+    assert equipment_db[0].name == "Modified Analyzer"
+
+def test_equipment_restored():
+    assert equipment_db[0].name == "Gas Analyzer 1"
