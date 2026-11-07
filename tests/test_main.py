@@ -1,18 +1,75 @@
-from fastapi.testclient import TestClient
-from src.main import app, equipment_db, measurement_db
+import sqlite3
+
 import pytest
-from copy import deepcopy
+from fastapi.testclient import TestClient
 
-client = TestClient(app)
+import src.main as main
+from src.database import get_connection
 
-initial_equipment = deepcopy(equipment_db)
-initial_measurements = deepcopy(measurement_db)
+
+client = TestClient(main.app)
 
 
 @pytest.fixture(autouse=True)
-def reset_test_data():
-    equipment_db[:] = deepcopy(initial_equipment)
-    measurement_db[:] = deepcopy(initial_measurements)
+def setup_test_database(tmp_path, monkeypatch):
+    test_db_path = tmp_path / "test_operations.db"
+
+    # Create the test database
+    connection = get_connection(test_db_path)
+
+    try:
+        connection.executescript("""
+            CREATE TABLE equipment (
+                equipment_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                location TEXT NOT NULL,
+                status TEXT NOT NULL
+            );
+
+            CREATE TABLE measurements (
+                measurement_id INTEGER PRIMARY KEY,
+                equipment_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                temperature REAL NOT NULL,
+                pressure REAL NOT NULL CHECK (pressure >= 0),
+                FOREIGN KEY (equipment_id)
+                    REFERENCES equipment(equipment_id)
+            );
+        """)
+
+        connection.executemany("""
+            INSERT INTO equipment
+                (equipment_id, name, location, status)
+            VALUES (?, ?, ?, ?)
+        """, [
+            ("GAS-101", "Gas Analyzer 1", "Process Line A", "online"),
+            ("GAS-102", "Gas Analyzer 2", "Process Line B", "warning"),
+            ("GAS-103", "Gas Analyzer 3", "Process Line C", "offline")
+        ])
+
+        connection.executemany("""
+            INSERT INTO measurements
+                (equipment_id, timestamp, temperature, pressure)
+            VALUES (?, ?, ?, ?)
+        """, [
+            ("GAS-101", "2026-10-11T10:00:00Z", 25.1, 101.3),
+            ("GAS-101", "2026-10-11T10:01:00Z", 25.3, 101.4),
+            ("GAS-102", "2026-10-11T10:00:00Z", 32.5, 102.1)
+        ])
+
+        connection.commit()
+
+    finally:
+        connection.close()
+
+    # Redirect FastAPI database connections to our test database
+    monkeypatch.setattr(
+        main,
+        "get_connection",
+        lambda: get_connection(test_db_path)
+    )
+
+    yield test_db_path
 
 def test_root():
     response = client.get("/")
@@ -74,22 +131,40 @@ def test_create_equipment_invalid_status():
 
     assert response.status_code == 422
 
-def test_modify_equipment():
-    equipment_db[0].name = "Modified Analyzer"
+def test_equipment_persistence():
+    new_equipment = {
+        "equipment_id": "GAS-105",
+        "name": "Gas Analyzer 5",
+        "location": "Process Line E",
+        "status": "online"
+    }
 
-    assert equipment_db[0].name == "Modified Analyzer"
+    response = client.post("/equipment", json=new_equipment)
+    assert response.status_code == 201
 
-def test_equipment_restored():
-    assert equipment_db[0].name == "Gas Analyzer 1"
+    response = client.get("/equipment")
+    equipment_ids = [
+        equipment["equipment_id"]
+        for equipment in response.json()
+    ]
+
+    assert "GAS-105" in equipment_ids
 
 
 def test_get_measurements():
     response = client.get("/measurements")
 
     assert response.status_code == 200
-    assert len(response.json()) == 3
-    assert response.json()[0]["equipment_id"] == "GAS-101"
-    assert response.json()[0]["temperature"] == 25.1
+
+    measurements = response.json()
+
+    assert len(measurements) == 3
+
+    assert any(
+        measurement["equipment_id"] == "GAS-101"
+        and measurement["temperature"] == 25.1
+        for measurement in measurements
+    )
 
 def test_create_measurement():
     new_measurement = {
@@ -118,7 +193,7 @@ def test_create_measurement_invalid_timestamp():
     )
 
     assert response.status_code == 422
-    assert len(measurement_db) == 3
+    assert len(client.get("/measurements").json()) == 3
 
 def test_create_measurement_negative_pressure():
     invalid_measurement = {
@@ -134,7 +209,7 @@ def test_create_measurement_negative_pressure():
     )
 
     assert response.status_code == 422
-    assert len(measurement_db) == 3
+    assert len(client.get("/measurements").json()) == 3
 
 def test_create_measurement_without_timezone():
     invalid_measurement = {
@@ -150,7 +225,7 @@ def test_create_measurement_without_timezone():
     )
 
     assert response.status_code == 422
-    assert len(measurement_db) == 3
+    assert len(client.get("/measurements").json()) == 3
 
 def test_create_measurement_timezone_normalization():
     new_measurement = {
@@ -167,7 +242,7 @@ def test_create_measurement_timezone_normalization():
 
     assert response.status_code == 201
     assert response.json()["timestamp"] == "2026-10-11T10:00:00Z"
-    assert len(measurement_db) == 4
+    assert len(client.get("/measurements").json()) == 4
 
 def test_create_measurement_unknown_equipment():
     invalid_measurement = {
@@ -184,4 +259,4 @@ def test_create_measurement_unknown_equipment():
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Equipment not found"
-    assert len(measurement_db) == 3
+    assert len(client.get("/measurements").json()) == 3

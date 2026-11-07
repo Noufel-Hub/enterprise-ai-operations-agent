@@ -27,3 +27,9 @@ htmlcov/
 
 # Logs
 *.log
+
+# Local SQLite databases
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
