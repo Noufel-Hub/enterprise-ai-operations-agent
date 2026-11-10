@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.main as main
-from src.database import get_connection
+from src.database import get_connection, init_db
 
 
 client = TestClient(main.app)
@@ -15,28 +15,11 @@ def setup_test_database(tmp_path, monkeypatch):
     test_db_path = tmp_path / "test_operations.db"
 
     # Create the test database
+    init_db(test_db_path)
+
     connection = get_connection(test_db_path)
 
     try:
-        connection.executescript("""
-            CREATE TABLE equipment (
-                equipment_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                location TEXT NOT NULL,
-                status TEXT NOT NULL
-            );
-
-            CREATE TABLE measurements (
-                measurement_id INTEGER PRIMARY KEY,
-                equipment_id TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                temperature REAL NOT NULL,
-                pressure REAL NOT NULL CHECK (pressure >= 0),
-                FOREIGN KEY (equipment_id)
-                    REFERENCES equipment(equipment_id)
-            );
-        """)
-
         connection.executemany("""
             INSERT INTO equipment
                 (equipment_id, name, location, status)
@@ -260,3 +243,39 @@ def test_create_measurement_unknown_equipment():
     assert response.status_code == 404
     assert response.json()["detail"] == "Equipment not found"
     assert len(client.get("/measurements").json()) == 3
+
+
+def test_ask_agent(monkeypatch):
+    class FakeMessage:
+        text = "The latest temperature of GAS-101 is 28.5°C."
+
+    class FakeAgent:
+        def invoke(self, state):
+            return {
+                "messages": [
+                    FakeMessage()
+                ]
+            }
+
+    monkeypatch.setattr(main, "agent", FakeAgent())
+
+    response = client.post(
+        "/agent/ask",
+        json={
+            "question": "What is the latest temperature of GAS-101?"
+        }
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "answer": "The latest temperature of GAS-101 is 28.5°C."
+    }
+
+
+def test_ask_agent_empty_question():
+    response = client.post(
+        "/agent/ask",
+        json={"question": ""}
+    )
+
+    assert response.status_code == 422

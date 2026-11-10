@@ -5,6 +5,11 @@ from src.models.equipment import Equipment
 from src.models.measurement import Measurement
 from src.database import get_connection
 
+from langchain_core.messages import HumanMessage
+
+from src.agent.graph import agent
+from src.models.agent import AgentRequest, AgentResponse
+
 
 app = FastAPI(
     title="Enterprise AI Operations Agent",
@@ -115,3 +120,16 @@ def create_measurement(measurement: Measurement):
 
     finally:
         connection.close()
+
+
+@app.post("/agent/ask", response_model=AgentResponse)
+def ask_agent(request: AgentRequest):
+    result = agent.invoke({
+        "messages": [
+            HumanMessage(content=request.question)
+        ]
+    })
+
+    final_message = result["messages"][-1]
+
+    return AgentResponse(answer=final_message.text)
