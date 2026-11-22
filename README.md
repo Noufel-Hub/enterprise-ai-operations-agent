@@ -228,6 +228,11 @@ The project is being developed incrementally, from a working backend to a more c
 - [ ] Add more operational analysis tools
 - [ ] Implement structured error handling
 - [ ] Evaluate tool selection and response grounding
+- [ ] Implement multiple operational analysis tools
+- [ ] Enable multi-tool reasoning with LangGraph
+- [ ] Build an MCP server exposing operational database tools
+- [ ] Integrate an MCP client with the LangGraph agent
+- [ ] Evaluate tool selection, response grounding, and MCP integration
 
 ### Phase 3 — Knowledge Retrieval and Advanced Workflows
 - [ ] Implement retrieval-augmented generation (RAG)

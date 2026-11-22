@@ -6,6 +6,13 @@ from fastapi.testclient import TestClient
 import src.main as main
 from src.database import get_connection, init_db
 
+from src.tools.sensor_tools import (
+    get_equipment_status,
+    list_equipment_by_status,
+    get_measurement_statistics
+)
+import src.tools.sensor_tools as sensor_tools
+
 
 client = TestClient(main.app)
 
@@ -279,3 +286,83 @@ def test_ask_agent_empty_question():
     )
 
     assert response.status_code == 422
+
+
+def test_get_equipment_status_tool(setup_test_database, monkeypatch):
+    test_db_path = setup_test_database
+
+    monkeypatch.setattr(
+        sensor_tools,
+        "get_connection",
+        lambda: get_connection(test_db_path)
+    )
+
+    result = get_equipment_status.invoke({
+        "equipment_id": "GAS-102"
+    })
+
+    assert result == {
+        "equipment_id": "GAS-102",
+        "name": "Gas Analyzer 2",
+        "location": "Process Line B",
+        "status": "warning"
+    }
+
+
+def test_list_equipment_by_status_tool(setup_test_database, monkeypatch):
+    test_db_path = setup_test_database
+
+    monkeypatch.setattr(
+        sensor_tools,
+        "get_connection",
+        lambda: get_connection(test_db_path)
+    )
+
+    result = list_equipment_by_status.invoke({
+        "status": "offline"
+    })
+
+    assert result == [
+        {
+            "equipment_id": "GAS-103",
+            "name": "Gas Analyzer 3",
+            "location": "Process Line C",
+            "status": "offline"
+        }
+    ]
+
+    empty_result = list_equipment_by_status.invoke({
+        "status": "maintenance"
+    })
+
+    assert empty_result == []
+
+
+def test_get_measurement_statistics_tool(
+    setup_test_database, monkeypatch
+):
+    test_db_path = setup_test_database
+
+    monkeypatch.setattr(
+        sensor_tools,
+        "get_connection",
+        lambda: get_connection(test_db_path)
+    )
+
+    result = get_measurement_statistics.invoke({
+        "equipment_id": "GAS-101"
+    })
+
+    assert result["equipment_id"] == "GAS-101"
+    assert result["measurement_count"] == 2
+
+    assert result["avg_temperature"] == pytest.approx(25.2)
+    assert result["min_temperature"] == pytest.approx(25.1)
+    assert result["max_temperature"] == pytest.approx(25.3)
+
+    assert result["avg_pressure"] == pytest.approx(101.35)
+    assert result["min_pressure"] == pytest.approx(101.3)
+    assert result["max_pressure"] == pytest.approx(101.4)
+
+    assert result["temperature_unit"] == "°C"
+    assert result["pressure_unit"] == "kPa"
